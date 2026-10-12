@@ -1,5 +1,14 @@
 # 更新记录
 
+## 2026-10-11（未发新镜像）
+
+### 文档：SDK 网关跨账号时 STS 端点只配一半的排查
+
+- operations.md「引导 SDK 网关接 GPT」核对清单加一条：IRSA + 跨账号 AssumeRole 要走 STS VPC Endpoint 时用 `AWS_ENDPOINT_URL_STS`，
+  只在自建 STS client 上设 `BaseEndpoint` 管不到 SDK 为 IRSA 内部新建的 `AssumeRoleWithWebIdentity` client，后者仍打公网 STS。故障排查表加对应报错一行。
+- 依据：本地用 aws-sdk-go-v2 config v1.33.5 / sts v1.51.0 复现（只设 `BaseEndpoint` 时内层打 `sts.us-west-2.amazonaws.com`，设环境变量后两层都走 VPCE）；
+  SDK 网关按此修改后跑通。网关本身的 STS 走 `sts_region` + 私有 DNS，不受影响，本次无代码变化。
+
 ## 2026-09-28（未发新镜像）
 
 ### 清零 GitHub CodeQL 的 6 条 open alert

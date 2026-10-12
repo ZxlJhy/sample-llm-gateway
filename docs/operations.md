@@ -92,6 +92,12 @@ SDK 网关接 Bedrock 上的 GPT，按下面几条核对（2026-09-23 在 us-wes
 - 带 function tools 时必须 `reasoning_effort: "none"`，否则 400 `Function tools with reasoning_effort are not supported`，与原生 `/openai/v1/chat/completions` 一致。
 - IAM action 是 `bedrock:InvokeModel`、`bedrock:InvokeModelWithResponseStream`，资源含 `inference-profile/*` 与 `foundation-model/*`。
 - 端点必须是 `bedrock-runtime.<region>.amazonaws.com`（或 bedrock-runtime 的 VPC Endpoint）。指到别的 Bedrock 主机时 SDK 报 404 `deserialization failed ... invalid character '<'`，见故障排查。
+- IRSA + 跨账号 AssumeRole 且 STS 要走 VPC Endpoint 专属域名时，用环境变量 `AWS_ENDPOINT_URL_STS=https://<sts-vpce-dns>` 指定，
+  不要只在自建的 STS client 上设 `o.BaseEndpoint`。后者只管外层 AssumeRole；`config.LoadDefaultConfig` 为 IRSA 内部新建的
+  STS client（`AssumeRoleWithWebIdentity`）拿不到这个设置，仍按区域打公网 `sts.<region>.amazonaws.com`。环境变量对进程内所有 STS client
+  生效，写在 Deployment 的 `env` 里或 `main()` 开头 `os.Setenv` 均可，后者要早于任何 `LoadDefaultConfig` / `NewFromConfig`（包括包级 `init()`）。
+  别用 `config.WithBaseEndpoint`，它对所有服务生效，会把 bedrock-runtime 也指到 STS 端点。STS 端点开了私有 DNS 时公网域名本身解析到私网，
+  不需要这项（2026-10-10 本地复现，SDK 网关按此修改后跑通）。
 
 ### 本地验证外接 API 供应商
 
@@ -238,6 +244,7 @@ stdout，一行一条 JSON。级别由 `server.log_level` 控制。
 | 转换路由 502 `protocol translation of upstream response failed` | 上游返回了 codec 没见过的响应形状 | `llmgw_translations_total{result="response_error"}`；日志带上游片段 | 反馈给维护者补 codec；临时可把该候选的 `providerProtocol` 去掉换回透传（如果客户端协议与供应商一致） |
 | 转换路由的回答被截断、`stop_reason: max_tokens` | 客户端没带 max_tokens，网关补的默认值不够 | `llmgw_translation_defaults_total{field="max_tokens"}` 有增长 | 调大 `server.default_max_tokens`，或让客户端显式传 |
 | 404 `operation error Bedrock Runtime: InvokeModel... StatusCode: 404 ... deserialization failed, failed to decode response body, invalid character '<'` | `bedrock_invoke` 指到了不是 bedrock-runtime 的主机（`bedrock.`、`bedrock-agent-runtime.`、别的服务的 VPC Endpoint），对端回 HTML/XML 的 404，SDK 按 JSON 解析失败。基于 AWS SDK 的网关配错端点也是这一行报错 | 错误里 RequestID 是 UUID 格式（说明到了某个 AWS 服务，只是不是 bedrock-runtime）；模型 ID 写错是 400 JSON `ValidationException`，不会是这个 | 把端点改成 `https://bedrock-runtime.<region>.amazonaws.com` 或 bedrock-runtime 的 VPC Endpoint 专属域名 |
+| 基于 AWS SDK 的网关跨账号调用失败 `operation error STS: AssumeRole ... get credentials: ... operation error STS: AssumeRoleWithWebIdentity ... Post "https://sts.<region>.amazonaws.com/": ... connection reset by peer`（或超时） | 只在 AssumeRole 用的 STS client 上设了 `BaseEndpoint`，IRSA 内层的 `AssumeRoleWithWebIdentity` 用 SDK 自建的 client，仍打公网 STS，被出口策略拦掉 | 报错里失败的是内层 `AssumeRoleWithWebIdentity`，目标是公网域名 `sts.<region>.amazonaws.com`，对端是公网 IP | 设环境变量 `AWS_ENDPOINT_URL_STS=https://<sts-vpce-dns>`，或给 STS 接口端点开私有 DNS；见上文「引导 SDK 网关接 GPT」核对清单 |
 | 502 `... upstream status 5xx` / 504 | 所有候选都在首包前失败 | `llmgw_upstream_failovers_total` 按 provider 看；日志有上游 body 片段 | 供应商侧问题；考虑加备用候选 |
 | 502 `upstream response body exceeds gateway limit` | 非流式响应体超过 64 MiB 上限，网关拒绝转发截断内容 | 日志 `upstream response body too large, rejecting` 带 `limit_bytes`/`upstream_status`；计量记 502、token 0 | 该响应确实过大；需要大响应时改用流式，或评估上限 |
 | Bedrock 返回 401/403 `not authorized to perform: bedrock:InvokeModel on resource: ...project/default` | Responses API 需要 `project/default` 资源权限，IAM 策略未授予 | 只有 `/v1/responses` 失败，messages / chat 正常 | IAM 策略加 `arn:aws:bedrock:*:*:project/default`；跨账号时是对端角色的策略 |
