@@ -2,6 +2,8 @@ module github.com/aws-samples/sample-llm-gateway
 
 go 1.26
 
+toolchain go1.26.9
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.0
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20

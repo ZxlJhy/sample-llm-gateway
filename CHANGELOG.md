@@ -1,5 +1,14 @@
 # 更新记录
 
+## 2026-10-12（未发新镜像）
+
+### 构建：Go 工具链钉到 go1.26.9，修复标准库漏洞
+
+- `go.mod` 加 `toolchain go1.26.9`。原来只写 `go 1.26`，GitHub Actions 的 setup-go 装到 go1.26.8，govulncheck 报 9 个标准库漏洞
+  （GO-2026-6603 ~ GO-2026-6617，`net/http` 7 个、`crypto/tls`、`net/textproto` 各 1 个），修复版本都是 go1.26.9。
+- 最低 Go 版本仍是 1.26；本地 Go 低于 1.26.9 时会按 `toolchain` 自动下载。本地 go1.26.9 下 `go vet`、`go test -race ./...` 通过，
+  govulncheck `No vulnerabilities found`。业务代码无改动，现有镜像是旧工具链编出来的，下次发版重编即带上修复。
+
 ## 2026-10-11（未发新镜像）
 
 ### 文档：SDK 网关跨账号时 STS 端点只配一半的排查
